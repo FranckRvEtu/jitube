@@ -7,15 +7,17 @@ import React, { useState, useRef, useEffect } from 'react';
 import { TypeAnimation } from 'react-type-animation';
 import { Mic, MicOff, Send, Volume2, VolumeX, ChevronRight, ChevronLeft } from 'lucide-react';
 
-// Clé API pour le service Mistral AI
-const MISTRAL_API_KEY = 'brNz25J6etEr4sQszhk8quLT9SlvRqTt';
-
 // Interface définissant la structure d'un message dans le chat
 interface Message {
   id: string;
   type: 'user' | 'bot';
   content: string;
   explanation?: string;
+}
+
+interface APIResponse {
+  quickrep: string;
+  explication: string;
 }
 
 function Assistant() {
@@ -25,6 +27,8 @@ function Assistant() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isPanelOpen, setIsPanelOpen] = useState(false);
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+
   
   // État initial du chat avec message de bienvenue
   const [messages, setMessages] = useState<Message[]>([
@@ -44,9 +48,11 @@ function Assistant() {
 
   // Effet pour faire défiler automatiquement vers le bas lors de nouveaux messages
   useEffect(() => {
+
     if (chatContainerRef.current) {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
+
   }, [messages]);
 
   // Gestion de la reconnaissance vocale
@@ -59,8 +65,8 @@ function Assistant() {
         recognitionRef.current.continuous = false;
         recognitionRef.current.interimResults = false;
 
-        recognitionRef.current.onresult = (event) => {
-          const transcript = event.results[0][0].transcript;
+        recognitionRef.current!.onresult = (event) => {
+          const transcript: string = event.results[0][0].transcript;
           setUserInput(transcript);
         };
 
@@ -79,14 +85,48 @@ function Assistant() {
     }
   };
 
-  // Gestion de la synthèse vocale
+  // Effet pour charger les voix disponibles
+  useEffect(() => {
+    const loadVoices = () => {
+      setVoices(window.speechSynthesis.getVoices());
+    };
+
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+
+    return () => {
+      window.speechSynthesis.onvoiceschanged = null;
+    };
+  }, []);
+
+  // Gestion de la synthèse vocale avec une voix maternelle et douce
   const speakText = (text: string) => {
     if ('speechSynthesis' in window) {
       setIsSpeaking(true);
       const utterance = new SpeechSynthesisUtterance(text);
+
+      // Cherche d'abord une voix féminine française
+      const motherlyVoice = voices.find(v => 
+        (v.name.includes("française") || v.name.includes("French")) && 
+        (v.name.toLowerCase().includes("female") || v.name.includes("Amélie") || 
+         v.name.includes("Sophie") || v.name.includes("Marie"))
+      ) || 
+      // Sinon, utilise une autre voix féminine
+      voices.find(v => 
+        v.name.includes("Google UK English Female") ||
+        v.name.includes("Samantha") ||
+        v.name.includes("Victoria") ||
+        v.name.includes("Karen")
+      );
+
+      if (motherlyVoice) {
+        utterance.voice = motherlyVoice;
+      }
+
       utterance.lang = 'fr-FR';
-      utterance.rate = 0.9;
-      utterance.pitch = 1.1;
+      utterance.rate = 0.85; // Plus lent pour une voix plus douce
+      utterance.pitch = 1.2; // Plus aigu pour une voix plus féminine
+      utterance.volume = 1.0; // Volume optimal pour une voix claire
       utterance.onend = () => setIsSpeaking(false);
       speechSynthesis.speak(utterance);
     }
@@ -99,7 +139,17 @@ function Assistant() {
     }
   };
 
-  // Gestion de l'envoi des messages et communication avec l'API Mistral
+  // Vérifie si une chaîne est un JSON valide
+  const isValidJSON = (str: string): boolean => {
+    try {
+      JSON.parse(str);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  };
+
+  // Gestion de l'envoi des messages et communication avec l'API
   const handleSubmit = async () => {
     if (!userInput.trim() || isLoading) return;
 
@@ -114,44 +164,39 @@ function Assistant() {
     setIsLoading(true);
 
     try {
-      const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
+      const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${MISTRAL_API_KEY}`,
         },
         body: JSON.stringify({
-          model: "mistral-tiny",
           messages: [
-            {
-              role: "system",
-              content: "Tu es un assistant mathématique amical pour les enfants autistes de 8 ans. Explique les concepts mathématiques de manière très simple, visuelle et concrète. Utilise des exemples de la vie quotidienne. Décompose chaque problème en très petites étapes faciles à comprendre. Évite les métaphores complexes. Sois patient, encourageant et rassurant. Structure tes explications de manière claire et prévisible."
-            },
             {
               role: "user",
               content: userInput
             }
-          ],
-          temperature: 0.7,
+          ]
         }),
       });
 
       if (!response.ok) {
-        throw new Error('Erreur lors de la communication avec Mistral');
+        throw new Error('Erreur lors de la communication avec le serveur');
       }
 
       const data = await response.json();
       const aiResponse = data.choices[0].message.content;
+      const parsedResponse = isValidJSON(aiResponse) ? 
+        JSON.parse(aiResponse) as APIResponse : 
+        { quickrep: aiResponse, explication: 'Pas d\'explication détaillée disponible.' };
 
-      const parts = aiResponse.split('\n\n');
-      const directResponse = parts[0];
-      const detailedExplanation = parts.slice(1).join('\n\n');
+      console.log("parsed response", parsedResponse);
+      console.log("parsed response", parsedResponse.quickrep);
 
       const botMessage: Message = {
         id: (Date.now() + 1).toString(),
         type: 'bot',
-        content: directResponse,
-        explanation: detailedExplanation,
+        content: parsedResponse.quickrep,
+        explanation: parsedResponse.explication,
       };
 
       setMessages((prev) => [...prev, botMessage]);

@@ -53,10 +53,18 @@ const handleVoiceInput = () => {
 #### 3. Synthèse Vocale
 ```typescript
 const speakText = (text: string) => {
-  // Configuration de la synthèse vocale
+  // Configuration de la synthèse vocale avec une voix maternelle
   const utterance = new SpeechSynthesisUtterance(text);
+  // Sélection prioritaire d'une voix féminine française
+  const motherlyVoice = voices.find(v => 
+    (v.name.includes("française") || v.name.includes("French")) && 
+    (v.name.toLowerCase().includes("female") || v.name.includes("Amélie"))
+  );
+  utterance.voice = motherlyVoice || defaultVoice;
   utterance.lang = 'fr-FR';
-  // Paramètres de voix adaptés aux enfants
+  utterance.rate = 0.85;  // Voix plus douce et lente
+  utterance.pitch = 1.2;  // Ton plus féminin
+  utterance.volume = 1.0; // Volume clair et rassurant
 };
 ```
 
